@@ -1,0 +1,544 @@
+{% extends 'dashboard/base.html' %}
+
+{% block title %}Apps{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-auto">
+        <h2>Applications</h2>
+    </div>
+    <div class="col-auto">
+        <select id="sortApps" class="form-select">
+            <option value="name">Sort by Name</option>
+            <option value="running">Running First</option>
+            <option value="rating-desc">Highest Rated</option>
+            <option value="rating-asc">Lowest Rated</option>
+            <option value="newest">Newest First</option>
+            <option value="oldest">Oldest First</option>
+        </select>
+    </div>
+    <div class="col-auto">
+        <input type="text" id="appFilter" class="form-control" placeholder="Quick filter..." style="width: 150px;">
+    </div>
+    <div class="col text-end">
+        <div class="d-inline-flex align-items-center">
+            <form method="post" action="{% url 'cleanup_autodiscovered' %}" class="me-2">
+                {% csrf_token %}
+                <div class="input-group">
+                    <select name="minutes" class="form-select" style="width: auto;">
+                        <option value="5">Last 5 minutes</option>
+                        <option value="15">Last 15 minutes</option>
+                        <option value="30">Last 30 minutes</option>
+                        <option value="60">Last hour</option>
+                        <option value="1440">Last 24 hours</option>
+                        <option value="10080">Last week</option>
+                    </select>
+                    <button type="submit" class="btn btn-warning" onclick="return confirm('This will remove all applications added in the selected time range. Continue?')">
+                        <i class="fas fa-broom"></i> Clean Recent Apps
+                    </button>
+                </div>
+            </form>
+            <a href="{% url 'app_autodiscover' %}" class="btn btn-info me-2">
+                <i class="fas fa-search"></i> Autodiscover Apps
+            </a>
+            <a href="{% url 'app_add' %}" class="btn btn-primary">
+                <i class="fas fa-plus"></i> Add Application
+            </a>
+        </div>
+    </div>
+</div>
+
+<div class="row row-cols-1 row-cols-md-3 g-4">
+    {% for app in apps %}
+    <div class="col">
+        <div class="card h-100 app-card">
+            <div class="card-body position-relative">
+                <span class="badge {% if app.status == 'Running' %}bg-success{% else %}bg-secondary{% endif %} status-badge">
+                    {{ app.status }}{% if app.status == 'Running' and app.port %} (Port: {{ app.port }}){% endif %}
+                </span>
+                <div class="star-rating mb-2" data-app-id="{{ app.id }}">
+                    {% for i in "12345" %}
+                    <i class="fas fa-star star-icon {% if app.rating >= forloop.counter %}text-warning{% else %}text-muted{% endif %}" 
+                       data-rating="{{ forloop.counter }}" 
+                       style="cursor: pointer;"></i>
+                    {% endfor %}
+                </div>
+                <h5 class="card-title">{{ app.name }}</h5>
+                <h6 class="card-subtitle mb-2 text-muted">{{ app.type }}</h6>
+                <p class="card-text description-truncate">{{ app.description|default:"No description"|truncatechars:100 }}</p>
+                <p class="card-text">
+                    <small class="text-muted">Path: {{ app.path }}</small>
+                </p>
+                <p class="card-text">
+                    <small class="text-muted created-at">{{ app.created_at|date:"c" }}</small>
+                </p>
+                {% if app.user_guide %}
+                <button class="btn btn-link btn-sm p-0" onclick="showUserGuide('{{ app.name|escapejs }}', '{{ app.user_guide|escapejs }}')">
+                    <i class="fas fa-book"></i> View User Guide
+                </button>
+                {% endif %}
+            </div>
+            <div class="card-footer bg-transparent">
+                <div class="btn-group w-100">
+                    {% if app.status == 'Running' %}
+                    <button class="btn btn-danger btn-sm app-action" data-action="stop" data-app-id="{{ app.id }}">
+                        <i class="fas fa-stop"></i> Stop
+                    </button>
+                    {% else %}
+                    <button class="btn btn-success btn-sm app-action" data-action="launch" data-app-id="{{ app.id }}">
+                        <i class="fas fa-play"></i> Launch
+                    </button>
+                    {% endif %}
+                    <a href="{% url 'app_edit' app.id %}" class="btn btn-primary btn-sm">
+                        <i class="fas fa-edit"></i> Edit
+                    </a>
+                    <a href="{% url 'app_delete' app.id %}" class="btn btn-danger btn-sm">
+                        <i class="fas fa-trash"></i> Delete
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% empty %}
+    <div class="col-12">
+        <div class="alert alert-info">
+            No applications found. <a href="{% url 'app_add' %}">Add your first application</a>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- User Guide Modal -->
+<div class="modal fade" id="userGuideModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">User Guide</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <h4 id="userGuideTitle" class="mb-3"></h4>
+                <div id="userGuideContent" class="user-guide-content"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Terminal Output Modal -->
+<div class="modal fade" id="terminalModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Terminal Output</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="terminalOutput" class="terminal-output"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Loading Modal -->
+<div class="modal fade" id="loadingModal" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title">Starting Application...</h5>
+            </div>
+            <div class="modal-body">
+                <div class="text-center mb-3">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <h4 id="loadingAppName" class="mt-2"></h4>
+                </div>
+                <div class="terminal-window bg-dark text-light p-3 rounded" style="height: 300px; overflow-y: auto; font-family: monospace;">
+                    <div id="loadingTerminalOutput" style="white-space: pre-wrap;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<style>
+.description-truncate {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    min-height: 4.5em;
+}
+.user-guide-content {
+    white-space: pre-wrap;
+    max-height: 60vh;
+    overflow-y: auto;
+}
+.terminal-output {
+    background-color: #1e1e1e;
+    color: #ffffff;
+    font-family: 'Consolas', 'Monaco', monospace;
+    padding: 1rem;
+    border-radius: 4px;
+    white-space: pre-wrap;
+    max-height: 60vh;
+    overflow-y: auto;
+}
+.terminal-output .error {
+    color: #ff6b6b;
+}
+
+#loadingModal .modal-content {
+    border: none;
+    border-radius: 8px;
+}
+
+#loadingModal .modal-header {
+    border-radius: 8px 8px 0 0;
+}
+
+.spinner-border {
+    width: 3rem;
+    height: 3rem;
+}
+
+.star-icon {
+    font-size: 1.2rem;
+    margin-right: 2px;
+    transition: color 0.2s ease-in-out;
+}
+
+.star-icon:hover {
+    transform: scale(1.1);
+}
+
+.star-rating {
+    display: inline-block;
+}
+
+.app-card {
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.app-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 15px rgba(0, 0, 0, 0.2);
+}
+</style>
+
+<script>
+const userGuideModal = new bootstrap.Modal(document.getElementById('userGuideModal'));
+const terminalModal = new bootstrap.Modal(document.getElementById('terminalModal'));
+const loadingModal = new bootstrap.Modal(document.getElementById('loadingModal'));
+
+// Initialize the appWindows Map to track browser windows
+const appWindows = new Map();
+
+// Add event handler for sort dropdown
+$('#sortApps').change(function() {
+    const sortBy = $(this).val();
+    sortCards(sortBy);
+});
+
+function sortCards(sortBy) {
+    const container = $('.row.row-cols-1.row-cols-md-3.g-4');
+    const cards = container.children('.col').get();
+    
+    cards.sort(function(a, b) {
+        const cardA = $(a).find('.card');
+        const cardB = $(b).find('.card');
+        
+        // Helper function to get name for consistent sorting
+        const getName = (card) => card.find('.card-title').text().toLowerCase();
+        
+        switch(sortBy) {
+            case 'running':
+                const statusA = cardA.find('.status-badge').text().includes('Running') ? 1 : 0;
+                const statusB = cardB.find('.status-badge').text().includes('Running') ? 1 : 0;
+                if (statusA !== statusB) {
+                    return statusB - statusA;  // Running apps first
+                }
+                // If status is the same, sort by name
+                return getName(cardA).localeCompare(getName(cardB));
+                
+            case 'name':
+                return getName(cardA).localeCompare(getName(cardB));
+                
+            case 'rating-desc':
+                const ratingA = cardA.find('.text-warning').length;
+                const ratingB = cardB.find('.text-warning').length;
+                return ratingB - ratingA;
+                
+            case 'rating-asc':
+                const ratingAsc1 = cardA.find('.text-warning').length;
+                const ratingAsc2 = cardB.find('.text-warning').length;
+                return ratingAsc1 - ratingAsc2;
+                
+            case 'newest':
+                const timeA = new Date($(a).find('.created-at').text()).getTime();
+                const timeB = new Date($(b).find('.created-at').text()).getTime();
+                return timeB - timeA;
+                
+            case 'oldest':
+                const timeOldA = new Date($(a).find('.created-at').text()).getTime();
+                const timeOldB = new Date($(b).find('.created-at').text()).getTime();
+                return timeOldA - timeOldB;
+                
+            default:
+                return 0;
+        }
+    });
+    
+    // Reattach sorted cards to container
+    cards.forEach(function(card) {
+        container.append(card);
+    });
+}
+
+// Initial sort by name
+$(document).ready(function() {
+    sortCards('name');
+});
+
+function showUserGuide(appName, userGuide) {
+    document.getElementById('userGuideTitle').textContent = appName;
+    document.getElementById('userGuideContent').textContent = userGuide;
+    userGuideModal.show();
+}
+
+function showTerminalOutput(output, title = 'Terminal Output') {
+    const terminalDiv = document.getElementById('terminalOutput');
+    terminalDiv.innerHTML = '';
+    
+    if (output) {
+        const lines = output.split('\n');
+        lines.forEach(line => {
+            const div = document.createElement('div');
+            if (line.startsWith('ERROR:')) {
+                div.className = 'error';
+            }
+            div.textContent = line;
+            terminalDiv.appendChild(div);
+        });
+    } else {
+        terminalDiv.textContent = 'No output available yet...';
+    }
+    
+    document.querySelector('#terminalModal .modal-title').textContent = title;
+    terminalModal.show();
+}
+
+function updateAppStatus(appId) {
+    appId = parseInt(appId); // Ensure appId is parsed as integer
+    $.ajax({
+        url: `/api/apps/${appId}/check_status/`,
+        method: 'GET',
+        success: function(response) {
+            const card = $(`.app-card[data-app-id="${appId}"]`);
+            const statusBadge = card.find('.status-badge');
+            const actionButton = card.find('.app-action');
+            
+            // Update status badge
+            statusBadge.text(response.status + (response.port ? ` (Port: ${response.port})` : ''));
+            statusBadge.removeClass('bg-success bg-secondary')
+                .addClass(response.status === 'Running' ? 'bg-success' : 'bg-secondary');
+            
+            // Update action button
+            if (response.status === 'Running') {
+                actionButton
+                    .removeClass('btn-success')
+                    .addClass('btn-danger')
+                    .html('<i class="fas fa-stop"></i> Stop')
+                    .data('action', 'stop');
+            } else {
+                actionButton
+                    .removeClass('btn-danger')
+                    .addClass('btn-success')
+                    .html('<i class="fas fa-play"></i> Launch')
+                    .data('action', 'launch');
+                
+                // If status changed to stopped, close browser window
+                const appWindow = appWindows.get(appId);
+                if (appWindow && !appWindow.closed) {
+                    try {
+                        appWindow.close();
+                    } catch (e) {
+                        console.log('Failed to close window in status check:', e);
+                    }
+                }
+                appWindows.delete(appId);
+            }
+        }
+    });
+}
+
+// Set up periodic status checks for all apps
+function setupStatusChecks() {
+    const appCards = document.querySelectorAll('.app-card');
+    appCards.forEach(card => {
+        const appId = card.getAttribute('data-app-id');
+        if (appId) {
+            // Initial check
+            updateAppStatus(appId);
+            // Set up periodic check every 5 seconds
+            setInterval(() => updateAppStatus(appId), 5000);
+        }
+    });
+}
+
+$(document).ready(function() {
+    // Add app-id to all cards for status updates
+    $('.app-card').each(function() {
+        const appId = $(this).find('.app-action').data('app-id');
+        $(this).attr('data-app-id', appId);
+    });
+
+    $('.app-action').click(function() {
+        const button = $(this);
+        const action = button.data('action');
+        const appId = parseInt(button.data('app-id'));
+        
+        if (action === 'launch') {
+            const appName = $(this).closest('.card').find('.card-title').text();
+            showLoadingScreen(appName);
+        } else if (action === 'stop') {
+            // Immediately close browser window if it exists
+            const appWindow = appWindows.get(appId);
+            if (appWindow && !appWindow.closed) {
+                try {
+                    appWindow.close();
+                } catch (e) {
+                    console.log('Failed to close window:', e);
+                }
+            }
+            appWindows.delete(appId);
+            
+            // Disable the stop button while processing
+            button.prop('disabled', true);
+        }
+        
+        $.ajax({
+            url: `/api/apps/${appId}/${action}/`,
+            method: 'POST',
+            success: function(response) {
+                if (response.status === 'error') {
+                    hideLoadingScreen();
+                    showTerminalOutput(response.output || response.message, 'Error');
+                    // Re-enable the stop button if there was an error
+                    if (action === 'stop') {
+                        button.prop('disabled', false);
+                    }
+                } else {
+                    if (action === 'launch') {
+                        if (response.startup_output && response.startup_output.length > 0) {
+                            updateTerminalOutput(response.startup_output);
+                        }
+                        
+                        if (response.url) {
+                            // Wait for server to be ready
+                            setTimeout(function() {
+                                hideLoadingScreen();
+                                
+                                // Close any existing window for this app
+                                const existingWindow = appWindows.get(appId);
+                                if (existingWindow && !existingWindow.closed) {
+                                    try {
+                                        existingWindow.close();
+                                    } catch (e) {
+                                        console.log('Failed to close existing window:', e);
+                                    }
+                                }
+                                
+                                // Open new window and store reference
+                                const newWindow = window.open(response.url, `app_${appId}`);
+                                if (newWindow) {
+                                    appWindows.set(appId, newWindow);
+                                    console.log('Stored window for app:', appId);
+                                    newWindow.onbeforeunload = function() {
+                                        console.log('Window closed for app:', appId);
+                                        appWindows.delete(appId);
+                                    };
+                                }
+                            }, 2000);
+                        } else {
+                            setTimeout(hideLoadingScreen, 3000);
+                        }
+                    } else if (action === 'stop') {
+                        // Update UI immediately on successful stop
+                        const card = $(`.app-card[data-app-id="${appId}"]`);
+                        const statusBadge = card.find('.status-badge');
+                        statusBadge.text('Stopped');
+                        statusBadge.removeClass('bg-success').addClass('bg-secondary');
+                        button
+                            .removeClass('btn-danger')
+                            .addClass('btn-success')
+                            .html('<i class="fas fa-play"></i> Launch')
+                            .data('action', 'launch')
+                            .prop('disabled', false);
+                    }
+                    
+                    // Update status after a short delay
+                    setTimeout(() => updateAppStatus(appId), 1000);
+                }
+            },
+            error: function(xhr) {
+                hideLoadingScreen();
+                // Re-enable the stop button if there was an error
+                if (action === 'stop') {
+                    button.prop('disabled', false);
+                }
+                let errorMessage = 'An error occurred';
+                try {
+                    const response = JSON.parse(xhr.responseText);
+                    errorMessage = response.message || response.error || errorMessage;
+                    if (response.output) {
+                        showTerminalOutput(response.output, 'Error');
+                        return;
+                    }
+                } catch (e) {}
+                alert(errorMessage);
+            }
+        });
+    });
+
+    // Add search filter functionality
+    $('#appFilter').on('input', function() {
+        const searchTerm = $(this).val().toLowerCase();
+        $('.app-card').each(function() {
+            const appName = $(this).find('.card-title').text().toLowerCase();
+            const appPath = $(this).find('.text-muted').text().toLowerCase();
+            const matches = appName.includes(searchTerm) || appPath.includes(searchTerm);
+            $(this).closest('.col').toggle(matches);
+        });
+    });
+});
+
+function showLoadingScreen(appName) {
+    document.getElementById('loadingAppName').textContent = appName;
+    document.getElementById('loadingTerminalOutput').textContent = 'Starting application...\n';
+    loadingModal.show();
+}
+
+function hideLoadingScreen() {
+    loadingModal.hide();
+}
+
+function updateTerminalOutput(output) {
+    const terminalOutput = document.getElementById('loadingTerminalOutput');
+    if (Array.isArray(output)) {
+        output = output.join('\n');
+    }
+    terminalOutput.textContent += output + '\n';
+    terminalOutput.scrollTop = terminalOutput.scrollHeight;
+}
+</script>
+{% endblock %}
