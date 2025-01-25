@@ -1,6 +1,5 @@
 # AppManager
 Appmanager finds your apps and runs them from a single place.
-# AppManager
 
 A Django-based application manager that helps you organize, discover, and run your applications from a single dashboard.
 
