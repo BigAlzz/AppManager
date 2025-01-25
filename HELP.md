@@ -1,139 +1,144 @@
-# AppManager Help Guide
+# App Manager Help Guide
+
+## Table of Contents
+1. [Getting Started](#getting-started)
+2. [Adding Applications](#adding-applications)
+3. [Managing Applications](#managing-applications)
+4. [Troubleshooting](#troubleshooting)
+5. [FAQ](#faq)
 
 ## Getting Started
 
-### Dashboard Overview
-The main dashboard shows all your applications in card format. Each card displays:
-- Application name and type
-- Current status (Running/Stopped)
-- Star rating
-- Description
-- Path location
-- Action buttons (Launch/Stop, Edit, Delete)
+### Prerequisites
+- Python 3.8 or higher
+- Virtual environment (recommended)
+- Git (for version control)
 
-### Quick Actions
-- **Search**: Use the quick filter box to find applications by name or path
-- **Sort**: Use the dropdown to sort applications by:
-  - Name
-  - Running status
-  - Rating (highest/lowest)
-  - Date added (newest/oldest)
-- **Clean**: Remove recently added applications using the cleanup dropdown
+### Installation
+1. Clone the repository:
+```bash
+git clone https://github.com/BigAlzz/AppManager.git
+cd AppManager
+```
 
-## Managing Applications
+2. Create and activate a virtual environment:
+```bash
+python -m venv venv
+# On Windows:
+venv\Scripts\activate
+# On Unix/MacOS:
+source venv/bin/activate
+```
 
-### Adding Applications Manually
+3. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+4. Run migrations:
+```bash
+python manage.py migrate
+```
+
+5. Start the server:
+```bash
+python manage.py runserver
+```
+
+## Adding Applications
+
+### Manual Addition
 1. Click the "Add Application" button
 2. Fill in the required fields:
-   - Name: A descriptive name for the application
-   - Path: Full path to the executable/script
-   - Type: Select from Django, Flask, Script, or Executable
+   - Name: A descriptive name for your application
+   - Path: Full path to the application directory
+   - Type: Select the application type (Django/Flask/Python Script)
 3. Optional fields:
    - Description: Brief description of the application
-   - User Guide: Detailed instructions for using the application
+   - User Guide: Markdown-formatted guide for using the application
+   - Star Rating: Rate the application (1-5 stars)
 
-### Auto-discovering Applications
+### Auto-discovery
 1. Click "Autodiscover Apps"
-2. Select the directory to scan
-3. AppManager will:
+2. Select the root directory to scan
+3. The system will automatically:
    - Find Python applications
    - Detect application type
    - Locate virtual environments
    - Extract descriptions from README files
-   - Add discovered applications to the dashboard
 
-### Running Applications
-1. Click the "Launch" button on an application card
-2. The system will:
-   - Activate the virtual environment (if available)
-   - Allocate a port (for web applications)
-   - Open a terminal window
-   - Start the application
-   - Open a browser (for web applications)
-3. Monitor the startup progress in the loading screen
+## Managing Applications
+
+### Launching Applications
+1. Click the "Launch" button on the application card
+2. For web applications:
+   - A port will be automatically assigned
+   - The application will open in a new browser tab
+3. For scripts:
+   - Output will be displayed in the terminal window
 
 ### Stopping Applications
-1. Click the "Stop" button on a running application
+1. Click the "Stop" button on the application card
 2. The system will:
-   - Close the browser window (for web applications)
-   - Stop all related processes
-   - Release the allocated port
+   - Terminate all related processes
+   - Free the assigned port
    - Update the application status
 
-## Application Types
-
-### Django Applications
-- Automatically assigned a free port
-- Runs with proper settings module
-- Opens browser to application URL
-- Shows running port in status
-
-### Flask Applications
-- Configured with correct host/port
-- Runs in development mode
-- Opens browser to application URL
-- Shows running port in status
-
-### Python Scripts
-- Runs in dedicated terminal window
-- Shows script output
-- Maintains terminal session
-- Proper virtual environment activation
-
-### Executable Files
-- Launches in appropriate mode
-- Handles command-line arguments
-- Manages process lifecycle
-
-## Features Guide
-
-### Star Ratings
-- Click on stars to rate applications
-- Ratings persist across sessions
-- Sort applications by rating
-- Use ratings to organize favorites
-
-### Quick Filter
-- Type to instantly filter applications
-- Matches against names and paths
-- Case-insensitive search
-- Real-time updates
-
-### Terminal Output
-- View application startup messages
-- See error messages and warnings
-- Monitor application status
-- Debug startup issues
-
-### User Guides
-- Add detailed instructions per application
-- Access guides through card buttons
-- Format text for readability
-- Include setup and usage details
+### Features
+- **Quick Search**: Filter applications by name or description
+- **Sorting**: Sort by name, rating, status, or creation date
+- **Star Rating**: Rate your favorite applications
+- **Status Monitoring**: Real-time status updates
+- **Terminal Output**: View application logs and output
 
 ## Troubleshooting
 
 ### Common Issues
-1. **Application Won't Start**
-   - Check if port is already in use
-   - Verify virtual environment exists
-   - Check file permissions
-   - Review terminal output for errors
 
-2. **Application Won't Stop**
-   - Use task manager to verify processes
-   - Check terminal window status
-   - Try stopping again after a moment
-   - Restart AppManager if needed
+#### Application Won't Start
+1. Check if the path is correct
+2. Verify virtual environment exists
+3. Ensure requirements.txt is present
+4. Check application permissions
 
-3. **Missing Dependencies**
-   - Create/update requirements.txt
-   - Activate correct virtual environment
-   - Install required packages
-   - Check Python version compatibility
+#### Port Already in Use
+1. Stop any running instances
+2. Check for other applications using the port
+3. Restart the App Manager
 
-### Getting Help
-- Check the terminal output for error messages
-- Review application logs
-- Verify file paths and permissions
-- Ensure virtual environments are properly set up 
+#### Virtual Environment Issues
+1. Ensure venv directory exists
+2. Check Python version compatibility
+3. Verify activation script permissions
+
+### Error Messages
+
+#### "Failed to launch application"
+- Verify the application path exists
+- Check if requirements.txt is present
+- Ensure virtual environment is accessible
+
+#### "Port {port} is already in use"
+- Stop other applications using the port
+- Check for background processes
+- Try restarting the application
+
+## FAQ
+
+### Q: How does auto-discovery work?
+A: The system scans directories for Python files, identifies application types based on file patterns (manage.py for Django, app.py for Flask), and detects virtual environments.
+
+### Q: Can I manage non-Python applications?
+A: Currently, the system supports Python applications (Django, Flask, scripts). Support for other types may be added in future versions.
+
+### Q: How are ports assigned?
+A: Ports are automatically assigned from a range of 9000-9999, ensuring no conflicts with other applications.
+
+### Q: Can I customize the port range?
+A: Yes, modify the port range in the application settings file.
+
+### Q: How do I update application details?
+A: Click the edit icon on the application card to modify name, description, or other details.
+
+### Q: What happens to running applications when I close App Manager?
+A: The system attempts to gracefully stop all running applications before shutting down. 

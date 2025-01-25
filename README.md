@@ -1,27 +1,41 @@
-# AppManager
+# App Manager
 
-A Django-based application manager that helps organize, discover, and run applications from a single dashboard.
+A powerful Django-based application manager that helps you organize, discover, and run your Python applications from a single dashboard. App Manager automatically detects application types, manages virtual environments, and provides a modern, user-friendly interface for application management.
 
-## Features
+![App Manager Dashboard](docs/images/dashboard.png)
 
-- **Application Discovery**: Automatically scan directories to find Python applications, including Django and Flask apps
-- **Smart Launch**: Automatically detects and runs applications in their correct environment
-- **Virtual Environment Support**: Automatically detects and uses virtual environments for applications
-- **Application Types Support**:
-  - Django Applications
-  - Flask Applications
-  - Python Scripts
-  - Executable Files
-- **User Interface Features**:
-  - Star Rating System
-  - Quick Search Filter
-  - Multiple Sorting Options (Name, Rating, Date, Running Status)
-  - Real-time Status Updates
-  - Terminal Output Display
-  - User Guide Support
-  - Application Cards with Description
+## Key Features
 
-## Installation
+### Application Management
+- **Smart Detection**: Automatically identifies Django, Flask, and Python script applications
+- **Virtual Environment Integration**: Detects and utilizes project-specific virtual environments
+- **Dependency Management**: Handles package installation and requirements.txt
+- **Port Management**: Automatic port allocation for web applications
+- **Process Control**: Clean process management with proper termination
+
+### User Interface
+- **Modern Dashboard**: Card-based interface with application details
+- **Real-time Updates**: Live status and output monitoring
+- **Quick Search**: Instant filtering of applications
+- **Smart Sorting**: Organize by name, status, rating, or date
+- **Star Ratings**: Rate and track favorite applications
+- **Terminal Output**: View application logs and messages
+- **Loading Screens**: Visual feedback during operations
+
+### Application Support
+- **Django Applications**: Automatic settings detection and port assignment
+- **Flask Applications**: Proper host/port configuration
+- **Python Scripts**: Terminal output capture and virtual env support
+- **Auto-discovery**: Scan directories for Python applications
+
+## Quick Start
+
+### Prerequisites
+- Python 3.8 or higher
+- Git (for version control)
+- Virtual environment (recommended)
+
+### Installation
 
 1. Clone the repository:
 ```bash
@@ -31,12 +45,10 @@ cd AppManager
 
 2. Create and activate a virtual environment:
 ```bash
-# Windows
 python -m venv venv
-.\venv\Scripts\activate
-
-# Linux/Mac
-python3 -m venv venv
+# On Windows:
+venv\Scripts\activate
+# On Unix/MacOS:
 source venv/bin/activate
 ```
 
@@ -59,57 +71,45 @@ The application will be available at `http://127.0.0.1:8000/`
 
 ## Usage
 
-1. **Adding Applications**:
-   - Click "Add Application" button
-   - Enter application details (name, path, type)
-   - Optionally add description and user guide
+### Adding Applications
+- **Manual**: Add applications with custom names and descriptions
+- **Auto-discover**: Scan directories to find Python applications automatically
 
-2. **Auto-discovering Applications**:
-   - Click "Autodiscover Apps" button
-   - Select the directory to scan
-   - AppManager will find and add applications automatically
+### Managing Applications
+- Launch/Stop applications with a single click
+- Monitor application status and output
+- Rate applications with the star system
+- Filter and sort applications as needed
 
-3. **Managing Applications**:
-   - Launch/Stop applications from the dashboard
-   - Rate applications with the star system
-   - Filter applications using the quick search
-   - Sort applications by various criteria
-   - View application status and terminal output
-
-4. **Application Types**:
-   - Django apps will run on automatically assigned ports
-   - Flask apps will run with proper host/port configuration
-   - Python scripts will run in their own terminal
-   - All apps run in their respective virtual environments if available
-
-## Features in Detail
-
-### Smart Application Discovery
-- Scans directories for Python applications
-- Detects application type (Django, Flask, Script)
-- Finds and uses virtual environments
-- Extracts descriptions from README files
-
-### Application Management
+### Features in Detail
 - Real-time status monitoring
 - Terminal output capture
 - Automatic port management
 - Virtual environment integration
 - Process cleanup on stop
-
-### User Interface
 - Modern card-based design
 - Real-time search filtering
 - Multiple sorting options
 - Star rating system
 - Terminal output display
 - Loading screens with progress
-- User guide modal
+- User guide support
+
+## Documentation
+
+For detailed information about using App Manager, please refer to the [Help Guide](HELP.md).
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details. 
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Acknowledgments
+
+- Django Framework
+- Bootstrap for UI components
+- Font Awesome for icons
+- All contributors who have helped shape this project 
