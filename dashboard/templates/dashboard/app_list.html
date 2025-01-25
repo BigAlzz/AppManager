@@ -136,7 +136,7 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-                <div id="terminalOutput" class="terminal-output"></div>
+                <div id="terminalOutputStandalone" class="terminal-output"></div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
@@ -146,22 +146,31 @@
 </div>
 
 <!-- Loading Modal -->
-<div class="modal fade" id="loadingModal" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1">
+<div class="modal fade" id="loadingModal" data-bs-backdrop="static" tabindex="-1" aria-labelledby="loadingModalLabel">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
-            <div class="modal-header bg-primary text-white">
-                <h5 class="modal-title">Starting Application...</h5>
+            <div class="modal-header">
+                <h5 class="modal-title" id="loadingModalLabel">Loading Application: <span id="loadingAppName"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
-                <div class="text-center mb-3">
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="checkbox" id="installDepsToggle">
+                    <label class="form-check-label" for="installDepsToggle">
+                        Install Dependencies
+                    </label>
+                </div>
+                <div class="d-flex justify-content-center mb-3">
                     <div class="spinner-border text-primary" role="status">
                         <span class="visually-hidden">Loading...</span>
                     </div>
-                    <h4 id="loadingAppName" class="mt-2"></h4>
                 </div>
-                <div class="terminal-window bg-dark text-light p-3 rounded" style="height: 300px; overflow-y: auto; font-family: monospace;">
-                    <div id="loadingTerminalOutput" style="white-space: pre-wrap;"></div>
+                <div id="loadingTerminalOutput" class="terminal-window">
+                    <pre id="terminalText" class="terminal-text"></pre>
                 </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
             </div>
         </div>
     </div>
@@ -233,6 +242,42 @@
     transform: translateY(-2px);
     box-shadow: 0 8px 15px rgba(0, 0, 0, 0.2);
 }
+
+.terminal-window {
+    background-color: #1e1e1e;
+    border: 1px solid #333;
+    border-radius: 4px;
+    padding: 10px;
+    margin-top: 10px;
+    min-height: 200px;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.terminal-text {
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 14px;
+    color: #fff;
+    margin: 0;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.terminal-text .error {
+    color: #ff6b6b;
+}
+
+.terminal-text .success {
+    color: #69db7c;
+}
+
+.terminal-text .warning {
+    color: #ffd43b;
+}
+
+.terminal-text .info {
+    color: #4dabf7;
+}
 </style>
 
 <script>
@@ -246,6 +291,8 @@ const appWindows = new Map();
 // Add event handler for sort dropdown
 $('#sortApps').change(function() {
     const sortBy = $(this).val();
+    // Save sort preference to localStorage
+    localStorage.setItem('appManagerSortPreference', sortBy);
     sortCards(sortBy);
 });
 
@@ -304,9 +351,16 @@ function sortCards(sortBy) {
     });
 }
 
-// Initial sort by name
+// Initialize sorting on page load
 $(document).ready(function() {
-    sortCards('name');
+    // Get saved sort preference from localStorage
+    const savedSort = localStorage.getItem('appManagerSortPreference') || 'name';
+    // Set the dropdown to the saved value
+    $('#sortApps').val(savedSort);
+    // Apply the sorting
+    sortCards(savedSort);
+    
+    // Rest of your existing document.ready code...
 });
 
 function showUserGuide(appName, userGuide) {
@@ -316,7 +370,7 @@ function showUserGuide(appName, userGuide) {
 }
 
 function showTerminalOutput(output, title = 'Terminal Output') {
-    const terminalDiv = document.getElementById('terminalOutput');
+    const terminalDiv = document.getElementById('terminalOutputStandalone');
     terminalDiv.innerHTML = '';
     
     if (output) {
@@ -402,6 +456,77 @@ $(document).ready(function() {
         $(this).attr('data-app-id', appId);
     });
 
+    // Set up star rating functionality
+    $('.star-rating .star-icon').hover(
+        function() {
+            // Hover in
+            const rating = $(this).data('rating');
+            const stars = $(this).parent().find('.star-icon');
+            stars.removeClass('text-warning').addClass('text-muted');
+            stars.slice(0, rating).removeClass('text-muted').addClass('text-warning');
+        },
+        function() {
+            // Hover out - restore original rating
+            const container = $(this).parent();
+            const appId = container.data('app-id');
+            const currentRating = parseInt($(`#current-rating-${appId}`).val()) || 0;
+            const stars = container.find('.star-icon');
+            stars.removeClass('text-warning').addClass('text-muted');
+            stars.slice(0, currentRating).removeClass('text-muted').addClass('text-warning');
+        }
+    );
+
+    // Handle star click
+    $('.star-rating .star-icon').click(function() {
+        const rating = $(this).data('rating');
+        const container = $(this).parent();
+        const appId = container.data('app-id');
+        const stars = container.find('.star-icon');
+
+        // Get CSRF token
+        const csrftoken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+
+        // Send rating to server
+        $.ajax({
+            url: `/api/apps/${appId}/`,
+            method: 'PATCH',
+            headers: {
+                'X-CSRFToken': csrftoken,
+                'Content-Type': 'application/json'
+            },
+            data: JSON.stringify({ rating: rating }),
+            success: function(response) {
+                // Update stars
+                stars.removeClass('text-warning').addClass('text-muted');
+                stars.slice(0, rating).removeClass('text-muted').addClass('text-warning');
+                // Store current rating
+                if (!$(`#current-rating-${appId}`).length) {
+                    container.append(`<input type="hidden" id="current-rating-${appId}" value="${rating}">`);
+                } else {
+                    $(`#current-rating-${appId}`).val(rating);
+                }
+            },
+            error: function(xhr, status, error) {
+                console.error('Failed to update rating:', error);
+                // Restore previous rating
+                const currentRating = parseInt($(`#current-rating-${appId}`).val()) || 0;
+                stars.removeClass('text-warning').addClass('text-muted');
+                stars.slice(0, currentRating).removeClass('text-muted').addClass('text-warning');
+            }
+        });
+    });
+
+    // Initialize current ratings
+    $('.star-rating').each(function() {
+        const container = $(this);
+        const appId = container.data('app-id');
+        const currentRating = container.find('.text-warning').length;
+        container.append(`<input type="hidden" id="current-rating-${appId}" value="${currentRating}">`);
+    });
+
+    // Set up status checks
+    setupStatusChecks();
+
     $('.app-action').click(function() {
         const button = $(this);
         const action = button.data('action');
@@ -409,105 +534,63 @@ $(document).ready(function() {
         
         if (action === 'launch') {
             const appName = $(this).closest('.card').find('.card-title').text();
-            showLoadingScreen(appName);
+            launchApp(appId, appName);
         } else if (action === 'stop') {
-            // Immediately close browser window if it exists
-            const appWindow = appWindows.get(appId);
-            if (appWindow && !appWindow.closed) {
-                try {
-                    appWindow.close();
-                } catch (e) {
-                    console.log('Failed to close window:', e);
-                }
-            }
-            appWindows.delete(appId);
-            
-            // Disable the stop button while processing
+            // Disable the button while stopping
             button.prop('disabled', true);
-        }
-        
-        $.ajax({
-            url: `/api/apps/${appId}/${action}/`,
-            method: 'POST',
-            success: function(response) {
-                if (response.status === 'error') {
-                    hideLoadingScreen();
-                    showTerminalOutput(response.output || response.message, 'Error');
-                    // Re-enable the stop button if there was an error
-                    if (action === 'stop') {
-                        button.prop('disabled', false);
-                    }
-                } else {
-                    if (action === 'launch') {
-                        if (response.startup_output && response.startup_output.length > 0) {
-                            updateTerminalOutput(response.startup_output);
-                        }
-                        
-                        if (response.url) {
-                            // Wait for server to be ready
-                            setTimeout(function() {
-                                hideLoadingScreen();
-                                
-                                // Close any existing window for this app
-                                const existingWindow = appWindows.get(appId);
-                                if (existingWindow && !existingWindow.closed) {
-                                    try {
-                                        existingWindow.close();
-                                    } catch (e) {
-                                        console.log('Failed to close existing window:', e);
-                                    }
-                                }
-                                
-                                // Open new window and store reference
-                                const newWindow = window.open(response.url, `app_${appId}`);
-                                if (newWindow) {
-                                    appWindows.set(appId, newWindow);
-                                    console.log('Stored window for app:', appId);
-                                    newWindow.onbeforeunload = function() {
-                                        console.log('Window closed for app:', appId);
-                                        appWindows.delete(appId);
-                                    };
-                                }
-                            }, 2000);
-                        } else {
-                            setTimeout(hideLoadingScreen, 3000);
-                        }
-                    } else if (action === 'stop') {
-                        // Update UI immediately on successful stop
-                        const card = $(`.app-card[data-app-id="${appId}"]`);
-                        const statusBadge = card.find('.status-badge');
-                        statusBadge.text('Stopped');
-                        statusBadge.removeClass('bg-success').addClass('bg-secondary');
-                        button
-                            .removeClass('btn-danger')
-                            .addClass('btn-success')
-                            .html('<i class="fas fa-play"></i> Launch')
-                            .data('action', 'launch')
-                            .prop('disabled', false);
-                    }
+            
+            // Show stopping status
+            const statusBadge = button.closest('.card').find('.status-badge');
+            statusBadge.text('Stopping...');
+            
+            fetch(`/api/apps/${appId}/stop/`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken')
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    // Update UI immediately
+                    button
+                        .removeClass('btn-danger')
+                        .addClass('btn-success')
+                        .html('<i class="fas fa-play"></i> Launch')
+                        .data('action', 'launch')
+                        .prop('disabled', false);
                     
-                    // Update status after a short delay
-                    setTimeout(() => updateAppStatus(appId), 1000);
-                }
-            },
-            error: function(xhr) {
-                hideLoadingScreen();
-                // Re-enable the stop button if there was an error
-                if (action === 'stop') {
-                    button.prop('disabled', false);
-                }
-                let errorMessage = 'An error occurred';
-                try {
-                    const response = JSON.parse(xhr.responseText);
-                    errorMessage = response.message || response.error || errorMessage;
-                    if (response.output) {
-                        showTerminalOutput(response.output, 'Error');
-                        return;
+                    statusBadge
+                        .text('Stopped')
+                        .removeClass('bg-success')
+                        .addClass('bg-secondary');
+                    
+                    // Close any associated browser window
+                    const appWindow = appWindows.get(appId);
+                    if (appWindow && !appWindow.closed) {
+                        try {
+                            appWindow.close();
+                        } catch (e) {
+                            console.log('Failed to close window:', e);
+                        }
                     }
-                } catch (e) {}
-                alert(errorMessage);
-            }
-        });
+                    appWindows.delete(appId);
+                    
+                    // Update status after a brief delay to confirm
+                    setTimeout(() => updateAppStatus(appId), 1000);
+                } else {
+                    // Re-enable button if stop failed
+                    button.prop('disabled', false);
+                    alert('Failed to stop application: ' + (data.message || 'Unknown error'));
+                }
+            })
+            .catch(error => {
+                console.error('Error stopping app:', error);
+                button.prop('disabled', false);
+                alert('Error stopping application');
+            });
+        }
     });
 
     // Add search filter functionality
@@ -523,22 +606,147 @@ $(document).ready(function() {
 });
 
 function showLoadingScreen(appName) {
+    const loadingModal = new bootstrap.Modal(document.getElementById('loadingModal'));
     document.getElementById('loadingAppName').textContent = appName;
-    document.getElementById('loadingTerminalOutput').textContent = 'Starting application...\n';
+    document.getElementById('terminalText').textContent = '';
     loadingModal.show();
 }
 
 function hideLoadingScreen() {
-    loadingModal.hide();
+    const loadingModal = bootstrap.Modal.getInstance(document.getElementById('loadingModal'));
+    if (loadingModal) {
+        loadingModal.hide();
+    }
 }
 
 function updateTerminalOutput(output) {
-    const terminalOutput = document.getElementById('loadingTerminalOutput');
-    if (Array.isArray(output)) {
-        output = output.join('\n');
-    }
-    terminalOutput.textContent += output + '\n';
-    terminalOutput.scrollTop = terminalOutput.scrollHeight;
+    const terminalText = document.getElementById('terminalText');
+    if (!terminalText) return;
+
+    // Process the output text to add color coding
+    let formattedOutput = output;
+    
+    // Color code different types of messages
+    formattedOutput = formattedOutput.replace(/error|failed|failure/gi, '<span class="error">$&</span>');
+    formattedOutput = formattedOutput.replace(/success|activated successfully/gi, '<span class="success">$&</span>');
+    formattedOutput = formattedOutput.replace(/warning/gi, '<span class="warning">$&</span>');
+    formattedOutput = formattedOutput.replace(/installing|initializing|activating|running/gi, '<span class="info">$&</span>');
+
+    terminalText.innerHTML = formattedOutput;
+    terminalText.scrollTop = terminalText.scrollHeight;
 }
+
+async function launchApp(appId, appName) {
+    showLoadingScreen(appName);
+    
+    const installDeps = document.getElementById('installDepsToggle').checked;
+    updateTerminalOutput('Preparing to launch application...\n' + 
+                        (installDeps ? 'Will install dependencies before running\n' : 'Skipping dependency installation\n'));
+    
+    try {
+        const response = await fetch(`/api/apps/${appId}/launch/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCookie('csrftoken')
+            },
+            body: JSON.stringify({
+                install_dependencies: installDeps
+            })
+        });
+
+        const data = await response.json();
+        
+        if (data.success) {
+            let isRunning = false;
+            let outputPollCount = 0;
+            const maxOutputPolls = 30; // Reduced from 60
+            
+            // Start polling for status and output simultaneously
+            const pollInterval = setInterval(async () => {
+                try {
+                    // Check status
+                    if (!isRunning) {
+                        const statusResponse = await fetch(`/api/apps/${appId}/check_status/`);
+                        const statusData = await statusResponse.json();
+                        
+                        if (statusData.status === 'Running') {
+                            isRunning = true;
+                            // Update UI
+                            const card = $(`.app-card[data-app-id="${appId}"]`);
+                            const actionButton = card.find('.app-action');
+                            const statusBadge = card.find('.status-badge');
+                            
+                            actionButton
+                                .removeClass('btn-success')
+                                .addClass('btn-danger')
+                                .html('<i class="fas fa-stop"></i> Stop')
+                                .data('action', 'stop')
+                                .prop('disabled', false);
+                            
+                            statusBadge
+                                .text('Running' + (statusData.port ? ` (Port: ${statusData.port})` : ''))
+                                .removeClass('bg-secondary')
+                                .addClass('bg-success');
+                            
+                            // If it's a web app, open in browser
+                            if (data.url) {
+                                window.open(data.url, '_blank');
+                                hideLoadingScreen();
+                            }
+                        }
+                    }
+                    
+                    // Get output
+                    const outputResponse = await fetch(`/api/apps/${appId}/output/`);
+                    const outputData = await outputResponse.json();
+                    
+                    if (outputData.output) {
+                        updateTerminalOutput(outputData.output);
+                    }
+                    
+                    outputPollCount++;
+                    if (outputPollCount >= maxOutputPolls || isRunning) {
+                        clearInterval(pollInterval);
+                        if (!isRunning) {
+                            // If we hit max polls but app isn't running, show error
+                            updateTerminalOutput('\nWarning: Application might be taking longer than expected to start.');
+                        }
+                        setTimeout(hideLoadingScreen, 2000); // Reduced from 10000
+                    }
+                } catch (error) {
+                    console.error('Error polling:', error);
+                    clearInterval(pollInterval);
+                    setTimeout(hideLoadingScreen, 2000);
+                }
+            }, 500); // Poll every 500ms instead of 1000ms
+        } else {
+            updateTerminalOutput(`Error: ${data.error || 'Failed to start application'}`);
+            setTimeout(hideLoadingScreen, 2000); // Reduced from 5000
+        }
+    } catch (error) {
+        console.error('Error launching app:', error);
+        updateTerminalOutput(`Error: ${error.message}`);
+        setTimeout(hideLoadingScreen, 2000);
+    }
+}
+
+function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            // Does this cookie string begin with the name we want?
+            if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                break;
+            }
+        }
+    }
+    return cookieValue;
+}
+
+let currentPath = '';
 </script>
 {% endblock %}

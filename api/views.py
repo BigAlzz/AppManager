@@ -20,12 +20,17 @@ class AppViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def launch(self, request, pk=None):
+        """Launch an application."""
         app = self.get_object()
+        
+        # Get dependency installation preference from request
+        install_dependencies = request.data.get('install_dependencies', True)
+        
+        # Create a temporary file for output
+        output_file = os.path.join(os.path.dirname(app.path), '_temp_output.txt')
+        
         try:
-            # Create a temporary file to capture output early
-            output_file = os.path.join(os.path.dirname(app.path), '_temp_output.txt')
-            
-            # Start with initial output
+            # Initialize output file with header
             with open(output_file, 'w', encoding='utf-8') as f:
                 f.write(f"Starting {app.name}...\n")
                 f.write("Checking environment...\n")
@@ -37,190 +42,145 @@ class AppViewSet(viewsets.ModelViewSet):
                     f.write("Activating virtual environment...\n")
                 else:
                     f.write("No virtual environment found, using system Python\n")
-
-            # Allocate port for Django/Flask apps
-            if app.type == 'script' and (app.is_django_app() or app.is_flask_app()):
+                
+                if install_dependencies:
+                    f.write("Will install dependencies before running\n")
+                else:
+                    f.write("Dependency installation skipped (user choice)\n")
+            
+            # For Django/Flask apps, ensure a port is allocated
+            if app.is_django_app() or app.is_flask_app():
                 if not app.port:
-                    if not app.allocate_port():
-                        return Response({
-                            'status': 'error',
-                            'message': 'No available ports'
-                        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-                    with open(output_file, 'a', encoding='utf-8') as f:
-                        f.write(f"Allocated port {app.port} for web application\n")
-
-            # Get the command with port if available
-            cmd = app.get_run_command()
+                    app.allocate_port()
+                if not app.port:
+                    return Response({
+                        'success': False,
+                        'error': 'Failed to allocate a port for the application'
+                    })
+            
+            # Get the command to run the application
+            cmd = app.get_run_command(install_dependencies)
             if not cmd:
                 return Response({
-                    'status': 'error',
-                    'message': 'Failed to generate run command'
-                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-            # Start the process in a new terminal window
-            try:
-                # Modify the command to be more verbose and capture output
-                if os.name == 'nt':
-                    verbose_cmd = [
-                        'echo Preparing to launch application...',
-                        'echo Checking Python environment...',
-                        'python --version',
-                        'echo.',
-                        'echo Loading required modules...',
-                        'python -c "import sys; print(\\"Python path:\\", *sys.path, sep=\\"\\n  \\")"',
-                        cmd.replace('cmd /k', '')  # Remove the cmd /k prefix as we'll add it back
-                    ]
-                    
-                    # Join commands with && for sequential execution
-                    cmd = f'cmd /k "{" && ".join(verbose_cmd)} > "{output_file}" 2>&1"'
-                
-                process = subprocess.Popen(cmd, shell=True)
-                
-                # Store the process ID in the app log
-                AppLog.objects.create(
-                    app=app,
-                    action='launch',
-                    details=f'Process started with PID: {process.pid}'
-                )
-                
-                # Mark as running and save immediately
-                app.status = 'Running'
-                app.save()
-                
-                # Try to read initial output
-                startup_output = []
-                try:
-                    if os.path.exists(output_file):
-                        with open(output_file, 'r', encoding='utf-8') as f:
-                            startup_output = f.readlines()
-                except:
-                    pass
-
-                # For web apps, wait a bit and try to connect to verify the server is running
-                if app.is_django_app() or app.is_flask_app():
-                    import socket
-                    max_retries = 10  # Try for up to 10 seconds
-                    server_started = False
-                    
-                    for i in range(max_retries):
-                        try:
-                            sock = socket.create_connection(('127.0.0.1', app.port), timeout=1)
-                            sock.close()
-                            server_started = True
-                            break
-                        except (socket.timeout, ConnectionRefusedError):
-                            time.sleep(1)
-                            continue
-                    
-                    if not server_started:
-                        app.release_port()
-                        return Response({
-                            'status': 'error',
-                            'message': 'Failed to start server',
-                            'command': cmd,
-                            'output': startup_output
-                        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-                
-                return Response({
-                    'status': 'success',
-                    'message': 'Application launched successfully',
-                    'port': app.port,
-                    'url': app.get_url(),
-                    'app_status': app.status,
-                    'app_name': app.name,
-                    'startup_output': startup_output
+                    'success': False,
+                    'error': 'Failed to generate run command'
                 })
-
-            except Exception as e:
-                return Response({
-                    'status': 'error',
-                    'message': f'Failed to start process: {str(e)}',
-                    'command': cmd
-                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
+            
+            # Start the process with proper output redirection
+            if os.name == 'nt':
+                # For Windows, start the process and redirect output
+                process = subprocess.Popen(
+                    cmd,
+                    shell=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    encoding='utf-8',
+                    errors='replace'
+                )
+            else:
+                process = subprocess.Popen(cmd, shell=True)
+            
+            # Log the launch with PID
+            app.logs.create(
+                action='launch',
+                details=f'Process started with PID: {process.pid}'
+            )
+            
+            # Update app status
+            app.status = 'Running'
+            app.save()
+            
+            # Wait briefly for initial output
+            time.sleep(1)
+            
+            # Try to read initial output
+            try:
+                with open(output_file, 'r', encoding='utf-8') as f:
+                    initial_output = f.read()
+            except:
+                initial_output = 'Initializing...'
+            
+            # Return success response with URL if it's a web app
+            response_data = {
+                'success': True,
+                'output': initial_output,
+                'pid': process.pid
+            }
+            
+            if app.is_django_app() or app.is_flask_app():
+                response_data['url'] = app.get_url()
+            
+            return Response(response_data)
+            
         except Exception as e:
             return Response({
-                'status': 'error',
-                'message': str(e)
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                'success': False,
+                'error': str(e)
+            })
+
+    @action(detail=True, methods=['GET'])
+    def output(self, request, pk=None):
+        """Get the terminal output for an application."""
+        app = self.get_object()
+        output_file = os.path.join(os.path.dirname(app.path), '_temp_output.txt')
+        
+        try:
+            if os.path.exists(output_file):
+                with open(output_file, 'r', encoding='utf-8') as f:
+                    output = f.read()
+                return Response({'output': output})
+            return Response({'output': ''})
+        except Exception as e:
+            return Response({'error': str(e)}, status=500)
 
     @action(detail=True, methods=['post'])
     def stop(self, request, pk=None):
+        """Stop a running application."""
         app = self.get_object()
-        killed_pids = []
+        terminated_pids = []
         
-        try:
-            # Get the latest launch log to find the process ID
-            latest_launch = app.logs.filter(action='launch').order_by('-timestamp').first()
-            if latest_launch:
+        # Get the latest launch log to find the process ID
+        latest_launch = app.logs.filter(action='launch').order_by('-timestamp').first()
+        
+        if latest_launch:
+            try:
+                # Extract PID from launch details
                 pid_match = re.search(r'PID: (\d+)', latest_launch.details)
                 if pid_match:
-                    main_pid = int(pid_match.group(1))
+                    pid = int(pid_match.group(1))
                     try:
-                        # Get the main process
-                        process = psutil.Process(main_pid)
-                        
-                        # Get all child processes before killing the parent
-                        children = process.children(recursive=True)
-                        
+                        process = psutil.Process(pid)
                         # Kill all child processes first
-                        for child in children:
-                            try:
-                                child.kill()
-                                killed_pids.append(child.pid)
-                            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                pass
-                        
-                        # Kill the main process
+                        for child in process.children(recursive=True):
+                            child.kill()
+                            terminated_pids.append(child.pid)
+                        # Then kill the main process
                         process.kill()
-                        killed_pids.append(main_pid)
-                            
-                        # Find and kill any PowerShell/CMD windows running our app
-                        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
-                            try:
-                                if proc.name().lower() in ['powershell.exe', 'cmd.exe']:
-                                    cmdline = ' '.join(proc.cmdline()).lower()
-                                    if app.path.lower() in cmdline:
-                                        # Get children before killing
-                                        shell_children = proc.children(recursive=True)
-                                        for child in shell_children:
-                                            try:
-                                                child.kill()
-                                                killed_pids.append(child.pid)
-                                            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                                pass
-                                        proc.kill()
-                                        killed_pids.append(proc.pid)
-                            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                continue
-                            
-                    except psutil.NoSuchProcess:
+                        terminated_pids.append(pid)
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
                         pass
-            
-            # Update app status
-            app.status = 'Stopped'
-            if app.port:
-                app.release_port()
-            app.save()
-            
-            # Log the stop action
-            AppLog.objects.create(
-                app=app,
-                action='stop',
-                details=f'Application stopped. Terminated PIDs: {killed_pids}'
-            )
-            
-            return Response({
-                'status': 'success',
-                'message': 'Application stopped successfully',
-                'terminated_pids': killed_pids
-            })
-            
-        except Exception as e:
-            return Response({
-                'status': 'error',
-                'message': f'Error stopping application: {str(e)}'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            except Exception as e:
+                return Response({
+                    'success': False,
+                    'error': str(e)
+                })
+        
+        # Update app status
+        app.status = 'Stopped'
+        app.save()
+        
+        # Log the stop action
+        app.logs.create(
+            action='stop',
+            details=f'Application stopped. Terminated PIDs: {terminated_pids}'
+        )
+        
+        return Response({
+            'success': True,
+            'message': 'Application stopped successfully',
+            'terminated_pids': terminated_pids
+        })
 
     @action(detail=True, methods=['get'])
     def status(self, request, pk=None):
@@ -312,3 +272,20 @@ class AppViewSet(viewsets.ModelViewSet):
                 'status': 'error',
                 'message': 'Invalid rating value'
             }, status=status.HTTP_400_BAD_REQUEST)
+
+    def create(self, request, *args, **kwargs):
+        """Create a new application."""
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        # Set initial status
+        serializer.validated_data['status'] = 'Stopped'
+        
+        # Create the app
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+    def perform_create(self, serializer):
+        """Perform the creation of the application."""
+        serializer.save(status='Stopped')

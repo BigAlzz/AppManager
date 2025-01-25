@@ -5,6 +5,7 @@ import re
 from django.utils import timezone
 from datetime import timedelta
 import psutil
+from django.core.exceptions import ValidationError
 
 # Create your models here.
 
@@ -178,6 +179,49 @@ class App(models.Model):
                         log(f"Added Flask application: {app_info['name']}")
                         break  # Only add one Flask app per directory
 
+            # Look for batch files (.bat)
+            batch_files = [f for f in files if f.lower().endswith('.bat')]
+            for file_name in batch_files:
+                file_path = root_path / file_name
+                if str(file_path) not in discovered_paths:
+                    log(f"Found batch file: {file_path}")
+                    app_info = {
+                        'name': os.path.splitext(file_name)[0],  # Use filename without extension
+                        'path': str(file_path),
+                        'type': 'script',
+                        'description': f'Windows Batch Script{" (with venv)" if has_venv else ""}',
+                        'user_guide': ''
+                    }
+                    cls._process_documentation(root_path, files, app_info, log)
+                    discovered_apps.append(app_info)
+                    discovered_paths.add(str(file_path))
+                    log(f"Added batch file: {app_info['name']}")
+
+            # Look for other Windows scripts (.cmd, .ps1, .vbs)
+            script_extensions = {
+                '.cmd': 'Windows Command Script',
+                '.ps1': 'PowerShell Script',
+                '.vbs': 'Visual Basic Script'
+            }
+            
+            for file_name in files:
+                file_ext = os.path.splitext(file_name.lower())[1]
+                if file_ext in script_extensions and str(file_path) not in discovered_paths:
+                    file_path = root_path / file_name
+                    script_type = script_extensions[file_ext]
+                    log(f"Found {script_type}: {file_path}")
+                    app_info = {
+                        'name': os.path.splitext(file_name)[0],  # Use filename without extension
+                        'path': str(file_path),
+                        'type': 'script',
+                        'description': f'{script_type}{" (with venv)" if has_venv else ""}',
+                        'user_guide': ''
+                    }
+                    cls._process_documentation(root_path, files, app_info, log)
+                    discovered_apps.append(app_info)
+                    discovered_paths.add(str(file_path))
+                    log(f"Added {script_type}: {app_info['name']}")
+
         log(f"\nDiscovery complete. Found {len(discovered_apps)} applications.")
         return discovered_apps
 
@@ -287,7 +331,8 @@ class App(models.Model):
                     python_path = os.path.join(venv_path, 'bin', 'python')
                     activate_path = os.path.join(venv_path, 'bin', 'activate')
                 
-                if os.path.exists(python_path):
+                # Only return if both python and activate exist
+                if os.path.exists(python_path) and os.path.exists(activate_path):
                     return {
                         'root': venv_path,
                         'python': python_path,
@@ -303,36 +348,42 @@ class App(models.Model):
         return ""
 
     def get_django_settings_module(self):
-        """Get the Django settings module name from manage.py"""
+        """Get the Django settings module for this application."""
         if not self.is_django_app():
             return None
             
-        content = self.extract_text_from_file(self.path)
-        if not content:
-            return None
-            
-        # Try to find the settings module in manage.py
-        match = re.search(r'os\.environ\.setdefault\(["\']DJANGO_SETTINGS_MODULE["\'],\s*["\']([^"\']+)["\']\)', content)
-        if match:
-            return match.group(1)
-            
-        # If not found in manage.py, look for settings.py in common locations
-        app_dir = os.path.dirname(self.path)
-        possible_locations = [
-            os.path.join(app_dir, 'settings.py'),
-            os.path.join(app_dir, 'config', 'settings.py'),
-            os.path.join(app_dir, app_dir.split(os.path.sep)[-1], 'settings.py')
-        ]
+        project_root = os.path.dirname(self.path)
         
-        for settings_path in possible_locations:
-            if os.path.exists(settings_path):
-                # Use the directory name as the module name
-                module_name = os.path.basename(app_dir)
-                return f"{module_name}.settings"
-                
+        # First, try to find settings in the same directory as manage.py
+        settings_files = ['settings.py', 'core/settings.py']
+        project_name = os.path.basename(project_root)
+        
+        # Add project-named settings locations
+        settings_files.extend([
+            f'{project_name}/settings.py',
+            f'{project_name.lower()}/settings.py',
+            f'src/{project_name}/settings.py',
+            f'src/{project_name.lower()}/settings.py'
+        ])
+        
+        for settings_file in settings_files:
+            full_path = os.path.join(project_root, settings_file)
+            if os.path.exists(full_path):
+                # Convert path to module notation
+                module_path = os.path.splitext(settings_file)[0].replace('/', '.')
+                if module_path.startswith('src.'):
+                    module_path = module_path[4:]  # Remove 'src.' prefix
+                return module_path
+        
+        # If no settings file is found, try to infer from directory structure
+        if os.path.exists(os.path.join(project_root, project_name, '__init__.py')):
+            return f'{project_name}.settings'
+        elif os.path.exists(os.path.join(project_root, project_name.lower(), '__init__.py')):
+            return f'{project_name.lower()}.settings'
+            
         return None
 
-    def get_run_command(self):
+    def get_run_command(self, install_dependencies=True):
         """Get the command to run the application."""
         if not os.path.exists(self.path):
             return None
@@ -340,7 +391,6 @@ class App(models.Model):
         venv_info = self.get_venv_path()
         app_dir = os.path.dirname(self.path)
         
-        # Handle different app types
         if self.is_django_app():
             project_root = os.path.dirname(self.path)
             settings_module = self.get_django_settings_module()
@@ -349,133 +399,221 @@ class App(models.Model):
                 # For Windows, create a minimal batch file
                 batch_content = [
                     '@echo off',
-                    'title Django Server',  # Set a consistent title for the window
-                    f'cd /d "{project_root}"'
+                    'setlocal enabledelayedexpansion',
+                    f'title Django Server - {self.name}',
+                    f'cd /d "{project_root}"',
+                    'echo Starting Django application...',
+                    'echo Project root: %CD%'  # Debug info
                 ]
                 
                 # Add venv activation if available
                 if venv_info:
-                    batch_content.append(f'call "{venv_info["activate"]}" > nul 2>&1')
+                    activate_script = venv_info["activate"].replace('/', '\\')
+                    batch_content.extend([
+                        'echo Activating virtual environment...',
+                        f'if exist "{activate_script}" (',
+                        f'    call "{activate_script}"',
+                        '    if !errorlevel! neq 0 (',
+                        '        echo Failed to activate virtual environment',
+                        '        exit /b 1',
+                        '    )',
+                        '    echo Virtual environment activated successfully',
+                        '    echo Using Python: & where python',  # Debug info
+                        ') else (',
+                        '    echo Virtual environment activation script not found',
+                        '    exit /b 1',
+                        ')'
+                    ])
                     
-                    # Check for requirements.txt and install if exists
-                    requirements_file = os.path.join(project_root, 'requirements.txt')
+                    # Only check requirements.txt if install_dependencies is True
+                    if install_dependencies:
+                        requirements_file = os.path.join(project_root, 'requirements.txt')
+                        if os.path.exists(requirements_file):
+                            batch_content.extend([
+                                'echo Installing dependencies...',
+                                f'pip install -r "{requirements_file}"',
+                                'if !errorlevel! neq 0 (',
+                                '    echo Failed to install dependencies',
+                                '    exit /b 1',
+                                ')',
+                                'echo Dependencies installed successfully'
+                            ])
+                
+                # Add environment variables and Django command
+                if settings_module:
+                    batch_content.extend([
+                        'echo Setting up Django environment...',
+                        f'echo Using settings module: {settings_module}',  # Debug info
+                        f'set "DJANGO_SETTINGS_MODULE={settings_module}"',
+                        'set "PYTHONUNBUFFERED=1"',
+                        'set "DJANGO_CORS_HEADERS_ALLOW_ALL=1"',
+                        'set "DJANGO_CORS_ORIGIN_ALLOW_ALL=1"',
+                        'set "DJANGO_CORS_ALLOW_CREDENTIALS=1"',
+                        'set "DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1"'
+                    ])
+                else:
+                    batch_content.extend([
+                        'echo Warning: No Django settings module found',
+                        'echo Attempting to use default settings...'
+                    ])
+                
+                # Run Django with the specified port and launch browser in a separate command
+                if self.port:
+                    # Create a health check batch file that also launches browser
+                    health_check = os.path.join(project_root, '_temp_health.bat')
+                    with open(health_check, 'w', encoding='utf-8') as f:
+                        f.write('@echo off\n')
+                        f.write('setlocal enabledelayedexpansion\n')
+                        f.write('set /a count=0\n')
+                        f.write(':check\n')
+                        # Use powershell for better web request handling
+                        f.write('powershell -Command "try { $response = Invoke-WebRequest -Uri http://127.0.0.1:%d -UseBasicParsing; exit $response.StatusCode } catch { exit 1 }" > nul 2>&1\n' % self.port)
+                        f.write('if !errorlevel! equ 200 (\n')
+                        f.write('    echo Server is ready\n')
+                        f.write('    start "" "http://127.0.0.1:%d"\n' % self.port)
+                        f.write('    exit /b 0\n')
+                        f.write(')\n')
+                        f.write('set /a count+=1\n')
+                        f.write('if !count! geq 60 (\n')
+                        f.write('    echo Server failed to start\n')
+                        f.write('    exit /b 1\n')
+                        f.write(')\n')
+                        f.write('timeout /t 1 /nobreak > nul\n')
+                        f.write('goto check\n')
+                    
+                    # Start both the server and health check
+                    batch_content.extend([
+                        'echo Starting Django server...',
+                        f'start "" cmd /c "{health_check}"',
+                        f'echo Server starting at http://127.0.0.1:{self.port}',
+                        'echo Command: python manage.py runserver...',  # Debug info
+                        f'python manage.py runserver 127.0.0.1:{self.port} --noreload --insecure'
+                    ])
+                else:
+                    batch_content.append('python manage.py runserver --noreload --insecure')
+                
+                # Create a temporary batch file
+                batch_path = os.path.join(project_root, '_temp_run.bat')
+                with open(batch_path, 'w', encoding='utf-8') as f:
+                    f.write('\n'.join(batch_content))
+                
+                # Return the command that will execute our batch file
+                # Use cmd /c to execute the batch file directly
+                return f'cmd /c "{batch_path}"'
+                
+        elif self.is_flask_app():
+            if os.name == 'nt':
+                batch_content = [
+                    '@echo off',
+                    'setlocal enabledelayedexpansion',
+                    f'title Flask Server - {self.name}',
+                    f'cd /d "{app_dir}"'
+                ]
+                
+                if venv_info:
+                    activate_script = venv_info["activate"].replace('/', '\\')
+                    batch_content.extend([
+                        'echo Activating virtual environment...',
+                        f'if exist "{activate_script}" (',
+                        f'    call "{activate_script}"',
+                        '    if !errorlevel! neq 0 (',
+                        '        echo Failed to activate virtual environment',
+                        '        exit /b 1',
+                        '    )',
+                        '    echo Virtual environment activated successfully',
+                        ') else (',
+                        '    echo Virtual environment activation script not found',
+                        '    exit /b 1',
+                        ')'
+                    ])
+                
+                if self.port:
+                    # Create a browser launch batch file
+                    browser_batch = os.path.join(app_dir, '_temp_browser.bat')
+                    with open(browser_batch, 'w', encoding='utf-8') as f:
+                        f.write('@echo off\n')
+                        f.write('timeout /t 5 /nobreak > nul\n')
+                        f.write(f'start "" "http://127.0.0.1:{self.port}"\n')
+                        f.write('del "%~f0"')
+                    
+                    batch_content.extend([
+                        f'start "" "{browser_batch}"',
+                        f'python "{os.path.basename(self.path)}" --host 127.0.0.1 --port {self.port}'
+                    ])
+                else:
+                    batch_content.append(f'python "{os.path.basename(self.path)}"')
+                
+                batch_path = os.path.join(app_dir, '_temp_run.bat')
+                with open(batch_path, 'w', encoding='utf-8') as f:
+                    f.write('\n'.join(batch_content))
+                
+                return f'start "Flask Server - {self.name}" /min cmd /k "{batch_path}"'
+                
+        elif os.path.splitext(self.path.lower())[1] == '.py':
+            # For regular Python scripts
+            if os.name == 'nt':
+                batch_content = [
+                    '@echo off',
+                    'setlocal enabledelayedexpansion',
+                    f'title Python Script - {self.name}',
+                    f'cd /d "{app_dir}"'
+                ]
+                
+                if venv_info:
+                    activate_script = venv_info["activate"].replace('/', '\\')
+                    batch_content.extend([
+                        'echo Activating virtual environment...',
+                        f'if exist "{activate_script}" (',
+                        f'    call "{activate_script}"',
+                        '    if !errorlevel! neq 0 (',
+                        '        echo Failed to activate virtual environment',
+                        '        exit /b 1',
+                        '    )',
+                        '    echo Virtual environment activated successfully',
+                        ') else (',
+                        '    echo Virtual environment activation script not found',
+                        '    exit /b 1',
+                        ')'
+                    ])
+                
+                # Only add dependency installation if explicitly requested
+                if install_dependencies:
+                    requirements_file = os.path.join(app_dir, 'requirements.txt')
                     if os.path.exists(requirements_file):
                         batch_content.extend([
                             'echo Installing dependencies...',
-                            f'pip install -r "{requirements_file}" > nul 2>&1',
-                            'if errorlevel 1 (',
+                            f'pip install -r "{requirements_file}"',
+                            'if !errorlevel! neq 0 (',
                             '    echo Failed to install dependencies',
-                            '    pause',
                             '    exit /b 1',
                             ')',
                             'echo Dependencies installed successfully'
                         ])
                 
-                # Add environment variables and Django command with minimal output
-                if settings_module:
-                    batch_content.append(f'set "DJANGO_SETTINGS_MODULE={settings_module}" > nul 2>&1')
-                    batch_content.append('set "PYTHONUNBUFFERED=1" > nul 2>&1')
+                batch_content.extend([
+                    f'python "{os.path.basename(self.path)}"',
+                    'if !errorlevel! neq 0 (',
+                    '    echo Script failed',
+                    '    pause',
+                    ')',
+                    'pause'
+                ])
                 
-                # Run Django with minimal output
-                batch_content.append(f'python -W ignore manage.py runserver 127.0.0.1:{self.port} --noreload --nothreading')
-                
-                # Create a temporary batch file
-                batch_path = os.path.join(project_root, '_temp_run.bat')
-                with open(batch_path, 'w') as f:
-                    f.write('\n'.join(batch_content))
-                
-                # Return command to run the batch file in a new window
-                return f'start "Django Server - {self.name}" /min cmd /k "{batch_path}"'
-            else:
-                # For Unix systems, minimal command
-                cmd_parts = [
-                    'gnome-terminal -- bash -c "',
-                    f'cd "{project_root}"'
-                ]
-                
-                if venv_info:
-                    cmd_parts.append(f'source "{venv_info["activate"]}" > /dev/null 2>&1')
-                    
-                    # Check for requirements.txt and install if exists
-                    requirements_file = os.path.join(project_root, 'requirements.txt')
-                    if os.path.exists(requirements_file):
-                        cmd_parts.extend([
-                            'echo Installing dependencies...',
-                            f'pip install -r "{requirements_file}" > /dev/null 2>&1 || {{ echo "Failed to install dependencies"; read -p "Press Enter to continue..."; exit 1; }}',
-                            'echo Dependencies installed successfully'
-                        ])
-                
-                if settings_module:
-                    cmd_parts.append(f'export DJANGO_SETTINGS_MODULE={settings_module}')
-                    cmd_parts.append('export PYTHONUNBUFFERED=1')
-                
-                cmd_parts.append(f'python -W ignore manage.py runserver 127.0.0.1:{self.port} --noreload --nothreading"')
-                
-                return ' && '.join(cmd_parts)
-                
-        elif self.is_flask_app():
-            if os.name == 'nt':
-                # Create minimal batch file for Flask app
-                batch_content = [
-                    '@echo off',
-                    f'cd /d "{app_dir}"'
-                ]
-                
-                if venv_info:
-                    batch_content.append(f'call "{venv_info["activate"]}" > nul')
-                
-                batch_content.append(f'python "{os.path.basename(self.path)}" --host 127.0.0.1 --port {self.port}')
-                
-                # Create a temporary batch file
                 batch_path = os.path.join(app_dir, '_temp_run.bat')
-                with open(batch_path, 'w') as f:
+                with open(batch_path, 'w', encoding='utf-8') as f:
                     f.write('\n'.join(batch_content))
                 
-                return f'start "Flask Server - {self.name}" cmd /k "{batch_path}"'
-            else:
-                cmd_parts = [
-                    'gnome-terminal -- bash -c "',
-                    f'cd "{app_dir}"'
-                ]
+                return f'start "{self.name}" /min cmd /k "{batch_path}"'
                 
-                if venv_info:
-                    cmd_parts.append(f'source "{venv_info["activate"]}" > /dev/null')
-                
-                cmd_parts.append(f'python "{os.path.basename(self.path)}" --host 127.0.0.1 --port {self.port}"')
-                
-                return ' && '.join(cmd_parts)
-                
-        elif self.path.lower().endswith('.py'):
-            if os.name == 'nt':
-                # Create minimal batch file for Python script
-                batch_content = [
-                    '@echo off',
-                    f'cd /d "{app_dir}"'
-                ]
-                
-                if venv_info:
-                    batch_content.append(f'call "{venv_info["activate"]}" > nul')
-                
-                batch_content.append(f'python "{os.path.basename(self.path)}"')
-                
-                # Create a temporary batch file
-                batch_path = os.path.join(app_dir, '_temp_run.bat')
-                with open(batch_path, 'w') as f:
-                    f.write('\n'.join(batch_content))
-                
-                return f'start "Python Script - {self.name}" cmd /k "{batch_path}"'
-            else:
-                cmd_parts = [
-                    'gnome-terminal -- bash -c "',
-                    f'cd "{app_dir}"'
-                ]
-                
-                if venv_info:
-                    cmd_parts.append(f'source "{venv_info["activate"]}" > /dev/null')
-                
-                cmd_parts.append(f'python "{os.path.basename(self.path)}"')
-                
-                return ' && '.join(cmd_parts)
+        # Handle other file types (batch, PowerShell, etc.) directly
+        elif os.path.splitext(self.path.lower())[1] in ['.bat', '.cmd']:
+            return f'start "{self.name}" /min cmd /k "cd /d "{app_dir}" & "{self.path}""'
+            
+        elif os.path.splitext(self.path.lower())[1] == '.ps1':
+            return f'start "{self.name}" /min powershell -NoExit -ExecutionPolicy Bypass -File "{self.path}"'
+            
+        elif os.path.splitext(self.path.lower())[1] == '.vbs':
+            return f'start "{self.name}" /min cmd /k "cd /d "{app_dir}" & cscript "{self.path}""'
         
         return None
 
@@ -542,6 +680,16 @@ class App(models.Model):
                 details='Application detected as stopped'
             )
         return self.status
+
+    def clean(self):
+        """Validate the model."""
+        super().clean()
+        
+        # Ensure path exists
+        if self.path and not os.path.exists(self.path):
+            raise ValidationError({
+                'path': 'The specified path does not exist.'
+            })
 
 class AppLog(models.Model):
     app = models.ForeignKey(App, on_delete=models.CASCADE, related_name='logs')
