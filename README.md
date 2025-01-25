@@ -1,6 +1,6 @@
 # AppManager
 
-A Django-based application manager that helps you organize, discover, and run your applications from a single dashboard.
+A Django-based application manager that helps organize, discover, and run applications from a single dashboard.
 
 ## Features
 
@@ -31,8 +31,13 @@ cd AppManager
 
 2. Create and activate a virtual environment:
 ```bash
+# Windows
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+.\venv\Scripts\activate
+
+# Linux/Mac
+python3 -m venv venv
+source venv/bin/activate
 ```
 
 3. Install dependencies:
