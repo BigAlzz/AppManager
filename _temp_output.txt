@@ -3,7 +3,3 @@ Checking environment...
 Using virtual environment: E:\Cline\Appmanager\venv
 Activating virtual environment...
 Dependency installation skipped (user choice)
-
-Executing command:
-start "Django Server - Appmanager" /min cmd /c "E:\Cline\Appmanager\_temp_run.bat"
-

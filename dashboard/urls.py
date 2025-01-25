@@ -3,6 +3,11 @@ from . import views
 
 urlpatterns = [
     path('', views.app_list, name='app_list'),
+    path('apps/', views.app_list, name='app_list'),
+    path('apps/<int:app_id>/launch/', views.launch_app, name='launch_app'),
+    path('apps/<int:app_id>/stop/', views.stop_app, name='stop_app'),
+    path('apps/<int:app_id>/status/', views.app_status, name='app_status'),
+    path('apps/<int:app_id>/output/', views.app_output, name='app_output'),
     path('app/add/', views.app_add, name='app_add'),
     path('app/<int:pk>/edit/', views.app_edit, name='app_edit'),
     path('app/<int:pk>/delete/', views.app_delete, name='app_delete'),

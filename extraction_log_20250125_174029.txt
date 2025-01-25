@@ -1,1 +1,0 @@
-2025-01-25 17:40:29,707 - __main__ - WARNING - Google credentials not found

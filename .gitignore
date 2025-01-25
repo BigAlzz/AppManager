@@ -20,12 +20,6 @@ wheels/
 .installed.cfg
 *.egg
 
-# Virtual Environment
-venv/
-ENV/
-env/
-.env/
-
 # Django
 *.log
 local_settings.py
@@ -33,12 +27,22 @@ db.sqlite3
 db.sqlite3-journal
 media/
 
+# Virtual Environment
+venv/
+ENV/
+
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
-*~
+
+# Temporary files
+_temp_*.bat
+_temp_*.txt
+
+# Environment variables
+.env
 
 # OS
 .DS_Store

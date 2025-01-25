@@ -1,0 +1,188 @@
+{% extends "dashboard/base.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Applications</h2>
+    
+    <!-- Loading Screen -->
+    <div class="loading-screen" style="display: none;">
+        <div class="spinner-border text-primary" role="status">
+            <span class="sr-only">Loading...</span>
+        </div>
+        <div class="mt-2">Loading</div>
+    </div>
+
+    <!-- Application Cards -->
+    <div class="row">
+        {% for app in apps %}
+        <div class="col-md-4 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">{{ app.name }}</h5>
+                    <p class="card-text">{{ app.description }}</p>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <button class="btn btn-primary launch-btn" data-app-id="{{ app.id }}" onclick="launchApp({{ app.id }})">Launch</button>
+                        <span class="badge badge-secondary status-badge" data-app-id="{{ app.id }}">Stopped</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+{% block javascript %}
+<script>
+function showLoading() {
+    document.querySelector('.loading-screen').style.display = 'flex';
+}
+
+function hideLoading() {
+    document.querySelector('.loading-screen').style.display = 'none';
+}
+
+function launchApp(appId) {
+    showLoading();
+    const button = document.querySelector(`button[data-app-id="${appId}"]`);
+    const statusBadge = document.querySelector(`span.status-badge[data-app-id="${appId}"]`);
+    
+    button.disabled = true;
+    
+    fetch(`/api/apps/${appId}/launch/`, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': getCookie('csrftoken'),
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.status === 'Running') {
+            button.textContent = 'Stop';
+            button.classList.remove('btn-primary');
+            button.classList.add('btn-danger');
+            button.onclick = () => stopApp(appId);
+            statusBadge.textContent = `Running on port ${data.port}`;
+            statusBadge.classList.remove('badge-secondary');
+            statusBadge.classList.add('badge-success');
+        }
+        button.disabled = false;
+        hideLoading();
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        button.disabled = false;
+        hideLoading();
+    });
+}
+
+function stopApp(appId) {
+    showLoading();
+    const button = document.querySelector(`button[data-app-id="${appId}"]`);
+    const statusBadge = document.querySelector(`span.status-badge[data-app-id="${appId}"]`);
+    
+    button.disabled = true;
+    
+    fetch(`/api/apps/${appId}/stop/`, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': getCookie('csrftoken'),
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        button.textContent = 'Launch';
+        button.classList.remove('btn-danger');
+        button.classList.add('btn-primary');
+        button.onclick = () => launchApp(appId);
+        statusBadge.textContent = 'Stopped';
+        statusBadge.classList.remove('badge-success');
+        statusBadge.classList.add('badge-secondary');
+        button.disabled = false;
+        hideLoading();
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        button.disabled = false;
+        hideLoading();
+    });
+}
+
+function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                break;
+            }
+        }
+    }
+    return cookieValue;
+}
+
+// Initial status check for all apps
+document.addEventListener('DOMContentLoaded', function() {
+    const apps = document.querySelectorAll('[data-app-id]');
+    const appIds = new Set();
+    apps.forEach(element => appIds.add(element.getAttribute('data-app-id')));
+    
+    appIds.forEach(appId => {
+        fetch(`/api/apps/${appId}/status/`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'Running') {
+                    const button = document.querySelector(`button[data-app-id="${appId}"]`);
+                    const statusBadge = document.querySelector(`span.status-badge[data-app-id="${appId}"]`);
+                    
+                    button.textContent = 'Stop';
+                    button.classList.remove('btn-primary');
+                    button.classList.add('btn-danger');
+                    button.onclick = () => stopApp(appId);
+                    statusBadge.textContent = `Running on port ${data.port}`;
+                    statusBadge.classList.remove('badge-secondary');
+                    statusBadge.classList.add('badge-success');
+                }
+            })
+            .catch(error => console.error('Error:', error));
+    });
+});
+
+function pollOutput(appId) {
+    const terminalText = document.getElementById('terminalText');
+    let serverStarted = false;
+    let pollInterval = setInterval(function() {
+        fetch(`/api/apps/${appId}/output/`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.output) {
+                    terminalText.textContent = data.output;
+                    terminalText.scrollTop = terminalText.scrollHeight;
+                    
+                    // Check for server start message in the output
+                    if (!serverStarted && data.output.includes('Starting development server at')) {
+                        const match = data.output.match(/Starting development server at (http:\/\/[^\s]+)/);
+                        if (match) {
+                            serverStarted = true;
+                            const serverUrl = match[1];
+                            window.open(serverUrl, '_blank');
+                        }
+                    }
+                }
+            })
+            .catch(err => {
+                console.error('Error polling output:', err);
+                clearInterval(pollInterval);
+            });
+    }, 1000);
+
+    // Store the interval ID to clear it later if needed
+    window.outputPollingIntervals = window.outputPollingIntervals || {};
+    window.outputPollingIntervals[appId] = pollInterval;
+}
+</script>
+{% endblock %}
+{% endblock %} 

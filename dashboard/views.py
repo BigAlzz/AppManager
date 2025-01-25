@@ -9,7 +9,8 @@ import string
 import psutil
 
 def app_list(request):
-    apps = App.objects.all().order_by('-created_at')
+    """Display list of applications"""
+    apps = App.objects.all().order_by('name')
     return render(request, 'dashboard/app_list.html', {'apps': apps})
 
 def app_add(request):
@@ -196,3 +197,45 @@ def cleanup_autodiscovered(request):
         except Exception as e:
             messages.error(request, f'Error cleaning up applications: {str(e)}')
     return redirect('app_list')
+
+def launch_app(request, app_id):
+    """Launch an application"""
+    app = get_object_or_404(App, pk=app_id)
+    
+    # Generate and execute the run command
+    cmd = app.get_run_command(install_dependencies=False)
+    if cmd:
+        app.status = 'Running'
+        app.save()
+        return JsonResponse({
+            'status': 'success',
+            'port': app.port
+        })
+    return JsonResponse({
+        'status': 'error',
+        'message': 'Failed to launch application'
+    })
+
+def stop_app(request, app_id):
+    """Stop an application"""
+    app = get_object_or_404(App, pk=app_id)
+    app.status = 'Stopped'
+    app.save()
+    return JsonResponse({
+        'status': 'success'
+    })
+
+def app_status(request, app_id):
+    """Get application status"""
+    app = get_object_or_404(App, pk=app_id)
+    return JsonResponse({
+        'status': app.status,
+        'port': app.port
+    })
+
+def app_output(request, app_id):
+    """Get application output"""
+    app = get_object_or_404(App, pk=app_id)
+    return JsonResponse({
+        'output': 'Application output will be shown here'
+    })

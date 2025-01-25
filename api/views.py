@@ -1,6 +1,6 @@
 from django.shortcuts import render
 from rest_framework import viewsets, status
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
 import psutil
 import subprocess
@@ -289,3 +289,31 @@ class AppViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         """Perform the creation of the application."""
         serializer.save(status='Stopped')
+
+@api_view(['GET'])
+def check_requirements(request, app_id):
+    """Check if requirements.txt exists for the app."""
+    try:
+        app = App.objects.get(pk=app_id)
+        requirements_path = os.path.join(app.path, 'requirements.txt')
+        exists = os.path.isfile(requirements_path)
+        return JsonResponse({'exists': exists})
+    except App.DoesNotExist:
+        return JsonResponse({'error': 'App not found'}, status=404)
+
+@api_view(['GET'])
+def app_output(request, app_id):
+    """Get the output for a specific app."""
+    try:
+        app = App.objects.get(pk=app_id)
+        output_file = os.path.join(os.path.dirname(app.path), '_temp_output.txt')
+        
+        if os.path.exists(output_file):
+            with open(output_file, 'r', encoding='utf-8') as f:
+                output = f.read()
+            return JsonResponse({'output': output})
+        return JsonResponse({'output': ''})
+    except App.DoesNotExist:
+        return JsonResponse({'error': 'App not found'}, status=404)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
